@@ -425,6 +425,12 @@ local Templates = {
         GlowIntensity = 0.6, -- 0 to 1, how strong it is right at the window edge
         -- GlowColor = Color3.fromRGB(255, 0, 0), -- optional: fixed color instead of the accent color
 
+        --// Liquid Glass \\--
+        LiquidGlass = false, -- see-through window with a blurred game behind it and glassy edge highlights
+        GlassTransparency = 0.35, -- 0 = solid, higher = more see-through (max 0.9)
+        GlassBlur = 12, -- how blurred the game behind the window is (0 = no blur)
+        GlassHighlights = true, -- bright glassy rim and soft sheen across the window
+
         UnlockMouseWhileOpen = true,
 
         EnableSidebarResize = false,
@@ -16835,6 +16841,218 @@ function Library:CreateWindow(WindowInfo)
         end
 
         BuildGlow()
+    end
+
+    --// Liquid Glass \\--
+    do
+        -- makes the window panels see-through, blurs the game world behind them (roblox's blur only
+        -- affects the 3D world, not UI, so the menu stays sharp) and adds a glassy rim + sheen.
+        local Lighting = cloneref(game:GetService("Lighting"))
+
+        local GlassSettings = {
+            Enabled = WindowInfo.LiquidGlass == true,
+            Transparency = WindowInfo.GlassTransparency,
+            Blur = WindowInfo.GlassBlur,
+            Highlights = WindowInfo.GlassHighlights ~= false,
+        }
+        Library.GlassSettings = GlassSettings
+
+        local Originals = setmetatable({}, { __mode = "k" })
+        local BlurEffect, HighlightHolder, DescendantConnection
+
+        local function IsGlassTarget(Object)
+            if not Object:IsA("GuiObject") or Object.BackgroundTransparency >= 1 then
+                return false
+            end
+
+            local Properties = Library.Registry[Object]
+            local Color = Properties and Properties.BackgroundColor3
+            return Color == "BackgroundColor" or Color == "MainColor"
+        end
+
+        local function StyleObject(Object)
+            if Originals[Object] == nil then
+                if not IsGlassTarget(Object) then
+                    return
+                end
+                Originals[Object] = Object.BackgroundTransparency
+            end
+
+            local Base = Originals[Object]
+            local Amount = math.clamp(GlassSettings.Transparency, 0, 0.9)
+            Object.BackgroundTransparency = Base + (1 - Base) * Amount
+        end
+
+        local function RefreshBlur()
+            local Wanted = GlassSettings.Enabled and GlassSettings.Blur > 0 and MainFrame.Visible
+
+            if Wanted then
+                if not BlurEffect then
+                    BlurEffect = Instance.new("BlurEffect")
+                    BlurEffect.Name = "ObsidianGlassBlur"
+                    BlurEffect.Parent = Lighting
+                end
+                BlurEffect.Size = GlassSettings.Blur
+            elseif BlurEffect then
+                BlurEffect:Destroy()
+                BlurEffect = nil
+            end
+        end
+
+        local function RefreshHighlights()
+            if HighlightHolder then
+                HighlightHolder:Destroy()
+                HighlightHolder = nil
+            end
+
+            if not (GlassSettings.Enabled and GlassSettings.Highlights) then
+                return
+            end
+
+            HighlightHolder = New("Frame", {
+                BackgroundTransparency = 1,
+                Name = "GlassHighlights",
+                Size = UDim2.fromScale(1, 1),
+                ZIndex = 0,
+                Parent = MainFrame,
+            })
+
+            -- soft sheen from the top-left corner
+            local Sheen = New("Frame", {
+                BackgroundColor3 = Color3.new(1, 1, 1),
+                Size = UDim2.fromScale(1, 1),
+                ZIndex = 0,
+                Parent = HighlightHolder,
+            })
+            New("UICorner", {
+                CornerRadius = UDim.new(0, WindowInfo.CornerRadius),
+                Parent = Sheen,
+            })
+            New("UIGradient", {
+                Rotation = 45,
+                Transparency = NumberSequence.new({
+                    NumberSequenceKeypoint.new(0, 0.86),
+                    NumberSequenceKeypoint.new(0.45, 0.97),
+                    NumberSequenceKeypoint.new(1, 1),
+                }),
+                Parent = Sheen,
+            })
+
+            -- bright glassy rim: strong at two opposite corners, faint along the sides
+            local Rim = New("Frame", {
+                BackgroundTransparency = 1,
+                Size = UDim2.fromScale(1, 1),
+                ZIndex = 50,
+                Parent = HighlightHolder,
+            })
+            New("UICorner", {
+                CornerRadius = UDim.new(0, WindowInfo.CornerRadius),
+                Parent = Rim,
+            })
+            local RimStroke = New("UIStroke", {
+                ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+                BorderStrokePosition = Enum.BorderStrokePosition.Inner,
+                Color = Color3.new(1, 1, 1),
+                Thickness = 1.5,
+                Parent = Rim,
+            })
+            New("UIGradient", {
+                Rotation = 45,
+                Transparency = NumberSequence.new({
+                    NumberSequenceKeypoint.new(0, 0.1),
+                    NumberSequenceKeypoint.new(0.3, 0.85),
+                    NumberSequenceKeypoint.new(0.7, 0.85),
+                    NumberSequenceKeypoint.new(1, 0.1),
+                }),
+                Parent = RimStroke,
+            })
+        end
+
+        local function RefreshGlass()
+            if GlassSettings.Enabled then
+                StyleObject(MainFrame)
+                for _, Descendant in MainFrame:GetDescendants() do
+                    StyleObject(Descendant)
+                end
+
+                -- tabs, groupboxes and elements created later get the glass look too
+                if not DescendantConnection then
+                    DescendantConnection = MainFrame.DescendantAdded:Connect(function(Descendant)
+                        task.defer(function()
+                            if GlassSettings.Enabled and Descendant.Parent then
+                                StyleObject(Descendant)
+                            end
+                        end)
+                    end)
+                end
+            else
+                if DescendantConnection then
+                    DescendantConnection:Disconnect()
+                    DescendantConnection = nil
+                end
+
+                for Object, Base in Originals do
+                    pcall(function()
+                        Object.BackgroundTransparency = Base
+                    end)
+                end
+                table.clear(Originals)
+            end
+
+            RefreshHighlights()
+            RefreshBlur()
+        end
+
+        MainFrame:GetPropertyChangedSignal("Visible"):Connect(RefreshBlur)
+
+        Library:OnUnload(function()
+            if BlurEffect then
+                BlurEffect:Destroy()
+                BlurEffect = nil
+            end
+        end)
+
+        function Library:SetLiquidGlass(Enabled: boolean)
+            GlassSettings.Enabled = Enabled == true
+            RefreshGlass()
+        end
+
+        function Library:SetGlassTransparency(Amount: number)
+            GlassSettings.Transparency = Amount
+            if GlassSettings.Enabled then
+                RefreshGlass()
+            end
+        end
+
+        function Library:SetGlassBlur(Amount: number)
+            GlassSettings.Blur = Amount
+            RefreshBlur()
+        end
+
+        function Library:SetGlassHighlights(Enabled: boolean)
+            GlassSettings.Highlights = Enabled == true
+            RefreshHighlights()
+        end
+
+        function Window:SetLiquidGlass(Enabled: boolean)
+            Library:SetLiquidGlass(Enabled)
+        end
+
+        function Window:SetGlassTransparency(Amount: number)
+            Library:SetGlassTransparency(Amount)
+        end
+
+        function Window:SetGlassBlur(Amount: number)
+            Library:SetGlassBlur(Amount)
+        end
+
+        function Window:SetGlassHighlights(Enabled: boolean)
+            Library:SetGlassHighlights(Enabled)
+        end
+
+        if GlassSettings.Enabled then
+            RefreshGlass()
+        end
     end
 
     --// Execution \\--
