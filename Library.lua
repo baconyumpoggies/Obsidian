@@ -403,6 +403,28 @@ local Templates = {
         ShowMobileButtons = true,
         MobileButtonsSide = "Left",
 
+        --// Close Button \\--
+        ShowCloseButton = false, -- true = adds a draggable close button next to Toggle/Lock
+        CloseButtonIcon = "x", -- any lucide icon name, rbxassetid or URL
+        -- CloseButtonSize = 32, -- optional: button size in pixels (default matches the Toggle/Lock buttons)
+        -- CloseButtonIconSize = 24, -- optional: icon size in pixels (default fits inside the button)
+        CloseButtonDraggable = true,
+        -- CloseButtonPosition = UDim2.fromOffset(6, 6), -- optional: overrides the default spot
+        -- CloseButtonAnchorPoint = Vector2.new(0, 0), -- optional: used with CloseButtonPosition
+        CloseAnimation = true, -- spin the button before closing
+        CloseAnimationTime = 0.35, -- how long the spin takes (seconds)
+        CloseAnimationDegrees = 180, -- how far it spins (always positive, direction is set below)
+        CloseAnimationDirection = "CounterClockwise", -- "CounterClockwise" or "Clockwise"
+        CloseAnimationEasingStyle = Enum.EasingStyle.Quad,
+        CloseAnimationEasingDirection = Enum.EasingDirection.Out,
+        CloseDelay = 1.5, -- wait after the spin before unloading (seconds)
+
+        --// Glow \\--
+        Glow = false, -- glow around the window that follows the accent color
+        GlowSize = 24, -- how far the glow reaches (pixels)
+        GlowIntensity = 0.6, -- 0 to 1, how strong it is right at the window edge
+        -- GlowColor = Color3.fromRGB(255, 0, 0), -- optional: fixed color instead of the accent color
+
         UnlockMouseWhileOpen = true,
 
         EnableSidebarResize = false,
@@ -543,6 +565,25 @@ local Templates = {
 
         AllowRightClickInput = true
     },
+    RangeSlider = {
+        Text = "Range Slider",
+        Min = 0,
+        Max = 100,
+        Rounding = 0,
+
+        Prefix = "",
+        Suffix = "",
+
+        ShowHandles = true,
+
+        Callback = function() end,
+        Changed = function() end,
+
+        Disabled = false,
+        Visible = true,
+
+        AllowRightClickInput = true,
+    },
     Dropdown = {
         Values = {},
         DisabledValues = {},
@@ -619,6 +660,12 @@ local Templates = {
         Default = Color3.new(1, 1, 1),
 
         Resizable = true,
+
+        RainbowButton = true, -- false = hide the rainbow button in the picker menu
+        Rainbow = false, -- start with rainbow already on
+        RainbowSpeed = 0.25, -- full color cycles per second
+        RainbowIcon = "rainbow", -- any lucide icon name
+        RainbowChanged = function() end, -- called with true/false when rainbow is toggled
 
         Callback = function() end,
         Changed = function() end,
@@ -5550,6 +5597,10 @@ do
             Callback = Info.Callback,
             Changed = Info.Changed,
 
+            Rainbow = false,
+            RainbowSpeed = Info.RainbowSpeed,
+            RainbowChanged = Info.RainbowChanged,
+
             Type = "ColorPicker",
         }
         ColorPicker.Hue, ColorPicker.Sat, ColorPicker.Vib = ColorPicker.Value:ToHSV()
@@ -5595,6 +5646,7 @@ do
         --// Color Menu \\--
         local MapSize = Library.IsMobile and 140 or 200
         local BarWidth = 16
+        local RainbowRowHeight = Library.IsMobile and 26 or 20
         local MenuWidth = MapSize + BarWidth + 6 + 12
         if Info.Transparency then
             MenuWidth += BarWidth + 6
@@ -5841,6 +5893,9 @@ do
             local FixedVerticalOverhead = 6 + 6 + 8 + 20 + 8 + 20 + FooterHeight
             if typeof(ColorPicker.Title) == "string" then
                 FixedVerticalOverhead += 8 + 8
+            end
+            if Info.RainbowButton then
+                FixedVerticalOverhead += 8 + RainbowRowHeight
             end
 
             local function ClampToViewport(NewWidth, NewHeight)
@@ -6396,6 +6451,197 @@ do
                     Color = Library.Scheme.OutlineColor,
                 }):Play()
             end))
+        end
+
+        --// Rainbow \\--
+        do
+            local GreyColor = Color3.fromRGB(125, 125, 125)
+            local HoverGreyColor = Color3.fromRGB(175, 175, 175)
+
+            local RainbowRow, RainbowIcon, RainbowGradient, RainbowLabel
+            local RainbowConnection
+            local Hovering = false
+            local SavedHSV
+
+            local function SetIconColor(Color: Color3)
+                if not RainbowIcon then
+                    return
+                end
+
+                if RainbowIcon:IsA("ImageLabel") then
+                    RainbowIcon.ImageColor3 = Color
+                else
+                    RainbowIcon.TextColor3 = Color
+                end
+            end
+
+            local function BuildSequence(Phase: number)
+                local Keypoints = {}
+                for Index = 0, 6 do
+                    table.insert(
+                        Keypoints,
+                        ColorSequenceKeypoint.new(Index / 6, Color3.fromHSV((Phase + Index / 6) % 1, 1, 1))
+                    )
+                end
+                return ColorSequence.new(Keypoints)
+            end
+
+            -- grey icon when off, rainbow icon when on
+            local function RefreshRainbowVisual()
+                if not RainbowIcon then
+                    return
+                end
+
+                if ColorPicker.Rainbow then
+                    SetIconColor(Color3.new(1, 1, 1))
+                    RainbowGradient.Enabled = true
+                    RainbowGradient.Color = BuildSequence(ColorPicker.Hue)
+                    RainbowLabel.TextTransparency = 0
+                else
+                    RainbowGradient.Enabled = false
+                    SetIconColor(Hovering and HoverGreyColor or GreyColor)
+                    RainbowLabel.TextTransparency = 0.5
+                end
+            end
+
+            if Info.RainbowButton then
+                RainbowRow = New("TextButton", {
+                    BackgroundTransparency = 1,
+                    LayoutOrder = 1,
+                    Size = UDim2.new(1, 0, 0, RainbowRowHeight),
+                    Text = "",
+                    Parent = ContentHolder,
+                })
+
+                RainbowIcon = New("ImageLabel", {
+                    AnchorPoint = Vector2.new(0, 0.5),
+                    BackgroundTransparency = 1,
+                    Position = UDim2.fromScale(0, 0.5),
+                    Size = UDim2.fromOffset(RainbowRowHeight, RainbowRowHeight),
+                    ImageColor3 = GreyColor,
+                    Parent = RainbowRow,
+                })
+
+                local IconSuccess, IconResult = pcall(function()
+                    local CustomIcon = Library:GetCustomIcon(Info.RainbowIcon)
+                    assert(CustomIcon, "Invalid rainbow icon")
+                    return Library:ApplyIcon(RainbowIcon, CustomIcon)
+                end)
+                if IconSuccess and IconResult then
+                    RainbowIcon = IconResult
+                end
+
+                RainbowGradient = New("UIGradient", {
+                    Enabled = false,
+                    Parent = RainbowIcon,
+                })
+
+                RainbowLabel = New("TextLabel", {
+                    BackgroundTransparency = 1,
+                    Position = UDim2.fromOffset(RainbowRowHeight + 6, 0),
+                    Size = UDim2.new(1, -(RainbowRowHeight + 6), 1, 0),
+                    Text = "Rainbow",
+                    TextSize = 14,
+                    TextTransparency = 0.5,
+                    TextXAlignment = Enum.TextXAlignment.Left,
+                    Parent = RainbowRow,
+                })
+
+                if not IconSuccess then
+                    -- icon set not available: fall back to a text-only button
+                    RainbowIcon.Visible = false
+                    RainbowLabel.Position = UDim2.fromOffset(0, 0)
+                    RainbowLabel.Size = UDim2.fromScale(1, 1)
+                end
+
+                table.insert(ColorPicker.Connections, RainbowRow.MouseEnter:Connect(function()
+                    Hovering = true
+                    RefreshRainbowVisual()
+                end))
+
+                table.insert(ColorPicker.Connections, RainbowRow.MouseLeave:Connect(function()
+                    Hovering = false
+                    RefreshRainbowVisual()
+                end))
+
+                table.insert(ColorPicker.Connections, RainbowRow.MouseButton1Click:Connect(function()
+                    if ParentObj.Disabled then
+                        return
+                    end
+
+                    ColorPicker:SetRainbow(not ColorPicker.Rainbow)
+                end))
+            end
+
+            local function StopRainbowLoop()
+                if not RainbowConnection then
+                    return
+                end
+
+                RainbowConnection:Disconnect()
+                local ConnectionIdx = table.find(ColorPicker.Connections, RainbowConnection)
+                if ConnectionIdx then
+                    table.remove(ColorPicker.Connections, ConnectionIdx)
+                end
+                RainbowConnection = nil
+            end
+
+            -- while rainbow is on, the hue cycles on its own; saturation/brightness stay as picked.
+            -- turning it off puts the color you had before back.
+            function ColorPicker:SetRainbow(Enabled: boolean)
+                Enabled = Enabled == true
+                if ColorPicker.Destroyed or ColorPicker.Rainbow == Enabled then
+                    return
+                end
+
+                ColorPicker.Rainbow = Enabled
+
+                if Enabled then
+                    SavedHSV = { ColorPicker.Hue, ColorPicker.Sat, ColorPicker.Vib }
+                    if ColorPicker.Sat < 0.1 then
+                        ColorPicker.Sat = 1
+                    end
+                    if ColorPicker.Vib < 0.1 then
+                        ColorPicker.Vib = 1
+                    end
+
+                    RainbowConnection = RunService.Heartbeat:Connect(function()
+                        if ColorPicker.Destroyed or Library.Unloaded then
+                            StopRainbowLoop()
+                            return
+                        end
+
+                        ColorPicker.Hue = (os.clock() * ColorPicker.RainbowSpeed) % 1
+                        ColorPicker:Update()
+                        RefreshRainbowVisual()
+                    end)
+                    table.insert(ColorPicker.Connections, RainbowConnection)
+                else
+                    StopRainbowLoop()
+
+                    if SavedHSV then
+                        ColorPicker.Hue, ColorPicker.Sat, ColorPicker.Vib = SavedHSV[1], SavedHSV[2], SavedHSV[3]
+                        SavedHSV = nil
+                    end
+                    ColorPicker:Update()
+                end
+
+                RefreshRainbowVisual()
+                Library:SafeCallback(ColorPicker.RainbowChanged, Enabled)
+            end
+
+            function ColorPicker:SetRainbowSpeed(Speed: number)
+                ColorPicker.RainbowSpeed = Speed
+            end
+
+            function ColorPicker:OnRainbowChanged(Func)
+                ColorPicker.RainbowChanged = Func
+            end
+
+            RefreshRainbowVisual()
+            if Info.Rainbow then
+                ColorPicker:SetRainbow(true)
+            end
         end
 
         ColorPicker:Update()
@@ -8098,6 +8344,7 @@ do
             Value = Info.Default,
 
             Finished = Info.Finished,
+            CommitOnBlur = Info.CommitOnBlur, -- nil = on for mobile, off for desktop
             Numeric = Info.Numeric,
             ClearTextOnFocus = Info.ClearTextOnFocus,
             ClearTextOnBlur = Info.ClearTextOnBlur,
@@ -8256,11 +8503,23 @@ do
         if Input.Finished then
             table.insert(Input.Connections, Box.FocusLost:Connect(function(Enter)
                 if not Enter then
-                    if Input.ClearTextOnBlur then
-                        Box.Text = Input.Value
+                    -- phones often don't report Enter, so on mobile tapping away applies the text too
+                    local CommitOnBlur = Input.CommitOnBlur
+                    if CommitOnBlur == nil then
+                        CommitOnBlur = Library.IsMobile
                     end
 
-                    return
+                    if not CommitOnBlur then
+                        if Input.ClearTextOnBlur then
+                            Box.Text = Input.Value
+                        end
+
+                        return
+                    end
+
+                    if Box.Text == Input.Value then
+                        return
+                    end
                 end
 
                 Input:SetValue(Box.Text)
@@ -8358,6 +8617,11 @@ do
 
     function Funcs:AddSlider(Idx, Info)
         if self.Destroyed then return nil end
+
+        -- AddSlider("Reach", { Range = true, Min = 0, Max = 10, Default = { 3, 5 } }) makes a from/to slider
+        if typeof(Info) == "table" and Info.Range == true then
+            return self:AddRangeSlider(Idx, Info)
+        end
 
         Info = Library:Validate(Info, Templates.Slider)
 
@@ -8743,6 +9007,536 @@ do
         table.insert(Groupbox.Elements, Slider)
 
         Slider.Default = Slider.Value
+
+        Options[Idx] = Slider
+
+        function Slider:Destroy()
+            Slider.Destroyed = true
+
+            if Slider.Connections then
+                for _, Connection in Slider.Connections do
+                    Connection:Disconnect()
+                end
+            end
+
+            if Slider.TooltipTable then
+                Slider.TooltipTable:Destroy()
+            end
+
+            if Holder then
+                Holder:Destroy()
+            end
+
+            local ElemIdx = table.find(Groupbox.Elements, Slider)
+            if ElemIdx then
+                table.remove(Groupbox.Elements, ElemIdx)
+            end
+
+            Groupbox:Resize()
+            Options[Idx] = nil
+        end
+
+        return Slider
+    end
+
+    function Funcs:AddRangeSlider(Idx, Info)
+        if self.Destroyed then return nil end
+
+        -- work out the starting range before Validate fills in defaults
+        local StartFrom, StartTo = Info.DefaultFrom, Info.DefaultTo
+        if typeof(Info.Default) == "table" then
+            StartFrom = StartFrom or Info.Default[1] or Info.Default.From
+            StartTo = StartTo or Info.Default[2] or Info.Default.To
+        end
+
+        Info = Library:Validate(Info, Templates.RangeSlider)
+
+        local Groupbox = self
+        local Container = Groupbox.Container
+
+        local Slider = {
+            Connections = {},
+            Destroyed = false,
+
+            Text = Info.Text,
+
+            Min = Info.Min,
+            Max = Info.Max,
+            From = math.clamp(StartFrom or Info.Min, Info.Min, Info.Max),
+            To = math.clamp(StartTo or Info.Max, Info.Min, Info.Max),
+
+            Prefix = Info.Prefix,
+            Suffix = Info.Suffix,
+            Compact = Info.Compact,
+            Rounding = Info.Rounding,
+            HideMax = Info.HideMax,
+
+            Tooltip = Info.Tooltip,
+            DisabledTooltip = Info.DisabledTooltip,
+            TooltipTable = nil,
+
+            Callback = Info.Callback,
+            Changed = Info.Changed,
+
+            Disabled = Info.Disabled,
+            Visible = Info.Visible,
+
+            AllowRightClickInput = Info.AllowRightClickInput,
+
+            Type = "RangeSlider",
+        }
+        if Slider.From > Slider.To then
+            Slider.From, Slider.To = Slider.To, Slider.From
+        end
+
+        local Holder = New("Frame", {
+            BackgroundTransparency = 1,
+            Size = UDim2.new(1, 0, 0, Info.Compact and 15 or 33),
+            Visible = Slider.Visible,
+            Parent = Container,
+        })
+
+        local SliderLabel
+        if not Info.Compact then
+            SliderLabel = New("TextLabel", {
+                BackgroundTransparency = 1,
+                Size = UDim2.new(1, 0, 0, 14),
+                Text = Slider.Text,
+                TextSize = 14,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                Parent = Holder,
+            })
+        end
+
+        local Bar = New("TextButton", {
+            Active = not Slider.Disabled,
+            AnchorPoint = Vector2.new(0, 1),
+            BackgroundColor3 = "MainColor",
+            Position = UDim2.fromScale(0, 1),
+            Size = UDim2.new(1, 0, 0, 15),
+            Text = "",
+            Parent = Holder,
+        })
+
+        New("UIStroke", {
+            Color = "OutlineColor",
+            Parent = Bar,
+        })
+
+        local DisplayLabel = New("TextLabel", {
+            BackgroundTransparency = 1,
+            Size = UDim2.fromScale(1, 1),
+            Text = "",
+            TextSize = 14,
+            ZIndex = Bar.ZIndex + 3,
+            Parent = Bar,
+        })
+        New("UIStroke", {
+            ApplyStrokeMode = Enum.ApplyStrokeMode.Contextual,
+            Color = GetTextStrokeColor,
+            LineJoinMode = Enum.LineJoinMode.Miter,
+            Parent = DisplayLabel,
+        })
+
+        local InputTextBox
+        if Info.AllowRightClickInput then
+            InputTextBox = New("TextBox", {
+                BackgroundTransparency = 1,
+                Size = UDim2.fromScale(1, 1),
+                Text = "",
+                TextSize = 14,
+                ZIndex = Bar.ZIndex + 4,
+                Visible = false,
+                ClearTextOnFocus = false,
+                Parent = Bar,
+            })
+            New("UIStroke", {
+                ApplyStrokeMode = Enum.ApplyStrokeMode.Contextual,
+                Color = GetTextStrokeColor,
+                LineJoinMode = Enum.LineJoinMode.Miter,
+                Parent = InputTextBox,
+            })
+        end
+
+        -- the filled part now sits between From and To instead of starting at the left edge
+        local Fill = New("Frame", {
+            BackgroundColor3 = "AccentColor",
+            Size = UDim2.fromScale(0.5, 1),
+            ZIndex = Bar.ZIndex + 1,
+            Parent = Bar,
+        })
+
+        local FromHandle, ToHandle
+        if Info.ShowHandles then
+            local function CreateHandle()
+                local Handle = New("Frame", {
+                    BackgroundColor3 = "FontColor",
+                    Size = UDim2.new(0, 4, 1, 0),
+                    ZIndex = Bar.ZIndex + 2,
+                    Parent = Bar,
+                })
+                table.insert(
+                    Library.Corners,
+                    New("UICorner", {
+                        CornerRadius = UDim.new(0, Library.CornerRadius / 2),
+                        Parent = Handle,
+                    })
+                )
+                return Handle
+            end
+
+            FromHandle = CreateHandle()
+            ToHandle = CreateHandle()
+        end
+
+        table.insert(
+            Library.Corners,
+            New("UICorner", {
+                CornerRadius = UDim.new(0, Library.CornerRadius / 2),
+                Parent = Bar,
+            })
+        )
+
+        table.insert(
+            Library.Corners,
+            New("UICorner", {
+                CornerRadius = UDim.new(0, Library.CornerRadius / 2),
+                Parent = Fill,
+            })
+        )
+
+        function Slider:UpdateColors()
+            if Library.Unloaded then
+                return
+            end
+
+            if SliderLabel then
+                SliderLabel.TextTransparency = Slider.Disabled and 0.8 or 0
+            end
+            DisplayLabel.TextTransparency = Slider.Disabled and 0.8 or 0
+
+            if Info.AllowRightClickInput then
+                InputTextBox.TextTransparency = Slider.Disabled and 0.8 or 0
+            end
+
+            Fill.BackgroundColor3 = Slider.Disabled and Library.Scheme.OutlineColor or Library.Scheme.AccentColor
+            Library.Registry[Fill].BackgroundColor3 = Slider.Disabled and "OutlineColor" or "AccentColor"
+
+            for _, Handle in { FromHandle, ToHandle } do
+                Handle.BackgroundTransparency = Slider.Disabled and 0.7 or 0
+            end
+        end
+
+        local function ToScale(Value: number)
+            if Slider.Max == Slider.Min then
+                return 0
+            end
+            return (Value - Slider.Min) / (Slider.Max - Slider.Min)
+        end
+
+        function Slider:Display()
+            if Library.Unloaded then
+                return
+            end
+
+            local CustomDisplayText = nil
+            if Info.FormatDisplayValue then
+                CustomDisplayText = Info.FormatDisplayValue(Slider, Slider.From, Slider.To)
+            end
+
+            if CustomDisplayText then
+                DisplayLabel.Text = tostring(CustomDisplayText)
+            else
+                if Info.Compact then
+                    DisplayLabel.Text = string.format(
+                        "%s: %s%s - %s%s",
+                        Slider.Text,
+                        Slider.Prefix,
+                        Slider.From,
+                        Slider.To,
+                        Slider.Suffix
+                    )
+                elseif Info.HideMax then
+                    DisplayLabel.Text =
+                        string.format("%s%s - %s%s", Slider.Prefix, Slider.From, Slider.To, Slider.Suffix)
+                else
+                    DisplayLabel.Text = string.format(
+                        "%s%s - %s%s/%s%s%s",
+                        Slider.Prefix,
+                        Slider.From,
+                        Slider.To,
+                        Slider.Suffix,
+                        Slider.Prefix,
+                        Slider.Max,
+                        Slider.Suffix
+                    )
+                end
+            end
+
+            local FromScale = ToScale(Slider.From)
+            local ToScaleValue = ToScale(Slider.To)
+            Fill.Position = UDim2.fromScale(FromScale, 0)
+            Fill.Size = UDim2.fromScale(ToScaleValue - FromScale, 1)
+
+            if FromHandle then
+                FromHandle.AnchorPoint = Vector2.new(FromScale, 0)
+                FromHandle.Position = UDim2.fromScale(FromScale, 0)
+                ToHandle.AnchorPoint = Vector2.new(ToScaleValue, 0)
+                ToHandle.Position = UDim2.fromScale(ToScaleValue, 0)
+            end
+        end
+
+        function Slider:OnChanged(Func)
+            Slider.Changed = Func
+        end
+
+        function Slider:RunChanged()
+            if Slider.Disabled then
+                return
+            end
+
+            Library:SafeCallback(Slider.Callback, Slider.From, Slider.To)
+            Library:SafeCallback(Slider.Changed, Slider.From, Slider.To)
+        end
+
+        -- Slider:SetValue(3, 5)  or  Slider:SetValue({ 3, 5 })  or  Slider:SetValue("3-5")
+        function Slider:SetValue(NewFrom, NewTo)
+            if typeof(NewFrom) == "table" then
+                NewFrom, NewTo = NewFrom[1] or NewFrom.From, NewFrom[2] or NewFrom.To
+            elseif typeof(NewFrom) == "string" and NewTo == nil then
+                local Text = NewFrom:gsub("%s+to%s+", ","):gsub("%s+", "")
+                local A, B = Text:match("^(%-?[%d%.]+)[,~%-]+(%-?[%d%.]+)$")
+                if not A then
+                    A = Text:match("^(%-?[%d%.]+)$")
+                    B = A
+                end
+                NewFrom, NewTo = A, B
+            end
+
+            NewFrom, NewTo = tonumber(NewFrom), tonumber(NewTo)
+            if not NewFrom or not NewTo then
+                return
+            end
+
+            if NewFrom > NewTo then
+                NewFrom, NewTo = NewTo, NewFrom
+            end
+            NewFrom = math.clamp(Round(NewFrom, Slider.Rounding), Slider.Min, Slider.Max)
+            NewTo = math.clamp(Round(NewTo, Slider.Rounding), Slider.Min, Slider.Max)
+
+            if NewFrom == Slider.From and NewTo == Slider.To then
+                return
+            end
+
+            Slider.From, Slider.To = NewFrom, NewTo
+            Slider:Display()
+            Slider:RunChanged()
+        end
+
+        -- only move one side. SetFrom can't go past To and SetTo can't go below From
+        function Slider:SetFrom(Value)
+            Value = tonumber(Value)
+            if Value then
+                Slider:SetValue(math.min(Value, Slider.To), Slider.To)
+            end
+        end
+
+        function Slider:SetTo(Value)
+            Value = tonumber(Value)
+            if Value then
+                Slider:SetValue(Slider.From, math.max(Value, Slider.From))
+            end
+        end
+
+        function Slider:GetRange()
+            return Slider.From, Slider.To
+        end
+
+        -- random number between From and To (respects Rounding), handy for click delays, reach, etc.
+        function Slider:GetRandom()
+            if Slider.From == Slider.To then
+                return Slider.From
+            end
+
+            return Round(Slider.From + math.random() * (Slider.To - Slider.From), Slider.Rounding)
+        end
+
+        function Slider:SetMax(Value)
+            assert(Value > Slider.Min, "Max value cannot be less than the current min value.")
+
+            Slider.Max = Value
+            Slider.From = math.clamp(Slider.From, Slider.Min, Slider.Max)
+            Slider.To = math.clamp(Slider.To, Slider.Min, Slider.Max)
+            Slider:Display()
+            Slider:RunChanged()
+        end
+
+        function Slider:SetMin(Value)
+            assert(Value < Slider.Max, "Min value cannot be greater than the current max value.")
+
+            Slider.Min = Value
+            Slider.From = math.clamp(Slider.From, Slider.Min, Slider.Max)
+            Slider.To = math.clamp(Slider.To, Slider.Min, Slider.Max)
+            Slider:Display()
+            Slider:RunChanged()
+        end
+
+        function Slider:SetDisabled(Disabled: boolean)
+            Slider.Disabled = Disabled
+
+            if Slider.TooltipTable then
+                Slider.TooltipTable.Disabled = Slider.Disabled
+            end
+
+            Bar.Active = not Slider.Disabled
+            Slider:UpdateColors()
+        end
+
+        function Slider:SetVisible(Visible: boolean)
+            Slider.Visible = Visible
+
+            Holder.Visible = Slider.Visible
+            Groupbox:Resize()
+        end
+
+        function Slider:SetText(Text: string)
+            Slider.Text = Text
+            if SliderLabel then
+                SliderLabel.Text = Text
+                return
+            end
+            Slider:Display()
+        end
+
+        function Slider:SetPrefix(Prefix: string)
+            Slider.Prefix = Prefix
+            Slider:Display()
+        end
+
+        function Slider:SetSuffix(Suffix: string)
+            Slider.Suffix = Suffix
+            Slider:Display()
+        end
+
+        -- right click / double tap: type a range like "3-5", "3 to 5", "3,5" (one number sets both sides)
+        if Info.AllowRightClickInput then
+            table.insert(Slider.Connections, InputTextBox.FocusLost:Connect(function()
+                InputTextBox.Visible = false
+                DisplayLabel.Visible = true
+
+                Slider:SetValue(InputTextBox.Text)
+            end))
+        end
+
+        local function GetValueUnderMouse()
+            local Scale = math.clamp((Mouse.X - Bar.AbsolutePosition.X) / Bar.AbsoluteSize.X, 0, 1)
+            return math.clamp(Round(Slider.Min + ((Slider.Max - Slider.Min) * Scale), Slider.Rounding), Slider.Min, Slider.Max)
+        end
+
+        local LastTap = 0
+        table.insert(Slider.Connections, Bar.InputBegan:Connect(function(Input: InputObject)
+            local ValidInput = IsClickInput(Input) or Input.UserInputType == Enum.UserInputType.MouseButton2
+            if not ValidInput or Slider.Disabled then
+                return
+            end
+
+            if Info.AllowRightClickInput then
+                local IsRightClick = Input.UserInputType == Enum.UserInputType.MouseButton2
+                local IsDoubleTap = false
+
+                if Library.IsMobile and Input.UserInputType == Enum.UserInputType.Touch then
+                    if tick() - LastTap < 0.3 then
+                        IsDoubleTap = true
+                    end
+
+                    LastTap = tick()
+                end
+
+                if IsRightClick or IsDoubleTap then
+                    InputTextBox.Text = string.format("%s-%s", Slider.From, Slider.To)
+                    InputTextBox.Visible = true
+                    DisplayLabel.Visible = false
+
+                    task.spawn(InputTextBox.CaptureFocus, InputTextBox)
+                    return
+                end
+            end
+
+            if not IsClickInput(Input) then
+                return
+            end
+
+            if Library.ActiveTab then
+                for _, Side in Library.ActiveTab.Sides do
+                    Side.ScrollingEnabled = false
+                end
+            end
+
+            if Library.ActiveLoading and Library.ActiveLoading.Sidebar then
+                Library.ActiveLoading.Sidebar.Container.ScrollingEnabled = false
+            end
+
+            -- which side to drag: the one closest to where you pressed.
+            -- if From and To are equal (like 10 to 10), the side is picked by which way you drag.
+            local PressValue = GetValueUnderMouse()
+            local DragSide
+            if Slider.From ~= Slider.To then
+                DragSide = math.abs(PressValue - Slider.From) <= math.abs(PressValue - Slider.To) and "From" or "To"
+            end
+
+            while IsDragInput(Input) and not Slider.Destroyed do
+                local Value = GetValueUnderMouse()
+
+                if not DragSide then
+                    if Value < Slider.From then
+                        DragSide = "From"
+                    elseif Value > Slider.To then
+                        DragSide = "To"
+                    end
+                end
+
+                if DragSide then
+                    local OldFrom, OldTo = Slider.From, Slider.To
+
+                    if DragSide == "From" then
+                        Slider.From = math.min(Value, Slider.To)
+                    else
+                        Slider.To = math.max(Value, Slider.From)
+                    end
+
+                    Slider:Display()
+                    if Slider.From ~= OldFrom or Slider.To ~= OldTo then
+                        Slider:RunChanged()
+                    end
+                end
+
+                RunService.RenderStepped:Wait()
+            end
+
+            if Library.ActiveTab then
+                for _, Side in Library.ActiveTab.Sides do
+                    Side.ScrollingEnabled = true
+                end
+            end
+
+            if Library.ActiveLoading and Library.ActiveLoading.Sidebar then
+                Library.ActiveLoading.Sidebar.Container.ScrollingEnabled = true
+            end
+        end))
+
+        if typeof(Slider.Tooltip) == "string" or typeof(Slider.DisabledTooltip) == "string" then
+            Slider.TooltipTable = Library:AddTooltip(Slider.Tooltip, Slider.DisabledTooltip, Bar)
+            Slider.TooltipTable.Disabled = Slider.Disabled
+        end
+
+        Slider:UpdateColors()
+        Slider:Display()
+        Groupbox:Resize()
+
+        Slider.Holder = Holder
+        table.insert(Groupbox.Elements, Slider)
+
+        Slider.Default = { Slider.From, Slider.To }
 
         Options[Idx] = Slider
 
@@ -12347,6 +13141,16 @@ function Library:CreateWindow(WindowInfo)
         local ValidIcon = false
 
         if typeof(Image) == "string" then
+            Image = Image:match("^%s*(.-)%s*$")
+
+            -- pasted roblox links (roblox.com/library/123, create.roblox.com/store/asset/123) -> just the id
+            local PastedId = Image:match("roblox%.com/library/(%d+)")
+                or Image:match("roblox%.com/store/asset/(%d+)")
+                or Image:match("roblox%.com/catalog/(%d+)")
+            if PastedId then
+                Image = PastedId
+            end
+
             local BackgroundIcon = Library:GetCustomIcon(Image)
 
             if BackgroundIcon then
@@ -12389,6 +13193,29 @@ function Library:CreateWindow(WindowInfo)
 
         if not ValidIcon then
             FillInstance(ImageContent(nil), BackgroundImage)
+
+            if typeof(Image) == "string" and Image ~= "" then
+                Library:Notify({
+                    Title = "Background image",
+                    Description = "Use an image id (123456 or rbxassetid://123456) or a direct .png/.jpg link.",
+                    Time = 6,
+                })
+            end
+        elseif BackgroundImage.Image ~= "" then
+            -- warn if roblox can't load it (wrong id type, removed asset, bad link)
+            task.spawn(function()
+                pcall(function()
+                    game:GetService("ContentProvider"):PreloadAsync({ BackgroundImage }, function(_, Status)
+                        if Status == Enum.AssetFetchStatus.Failure or Status == Enum.AssetFetchStatus.TimedOut then
+                            Library:Notify({
+                                Title = "Background image",
+                                Description = "Couldn't load that image. If it's a decal id, try the Image id instead.",
+                                Time = 6,
+                            })
+                        end
+                    end)
+                end)
+            end)
         end
 
         HasBackgroundImage = ValidIcon
@@ -15667,12 +16494,13 @@ function Library:CreateWindow(WindowInfo)
         task.spawn(Library.Toggle)
     end
 
+    local ToggleButton, LockButton
     if Library.IsMobile then
-        local ToggleButton = Library:AddDraggableButton("Toggle", function()
+        ToggleButton = Library:AddDraggableButton("Toggle", function()
             Library:Toggle()
         end, true)
 
-        local LockButton = Library:AddDraggableButton("Lock", function(self)
+        LockButton = Library:AddDraggableButton("Lock", function(self)
             Library.CantDragForced = not Library.CantDragForced
             self:SetText(Library.CantDragForced and "Unlock" or "Lock")
         end, true)
@@ -15695,6 +16523,318 @@ function Library:CreateWindow(WindowInfo)
             ToggleButton.Button.Visible = false
             LockButton.Button.Visible = false
         end
+    end
+
+    --// Close Button \\--
+    do
+        local FallbackCloseIcon = "rbxassetid://10747384394"
+
+        -- default size matches the Toggle/Lock buttons (square, same height)
+        local _, AutoTextHeight = Library:GetTextBounds("Toggle", Library.Scheme.Font, 16)
+        local AutoButtonSize = ToggleButton and ToggleButton.Button.Size.Y.Offset or (AutoTextHeight * 2)
+        local CustomIconSize = typeof(WindowInfo.CloseButtonIconSize) == "number"
+        local CustomButtonSize = typeof(WindowInfo.CloseButtonSize) == "number"
+
+        local StartButtonSize = AutoButtonSize
+        local StartIconSize
+        if CustomButtonSize then
+            StartButtonSize = WindowInfo.CloseButtonSize
+            StartIconSize = CustomIconSize and WindowInfo.CloseButtonIconSize or (StartButtonSize - 8)
+        elseif CustomIconSize then
+            StartIconSize = WindowInfo.CloseButtonIconSize
+            StartButtonSize = math.max(AutoButtonSize, StartIconSize + 8)
+        else
+            StartIconSize = StartButtonSize - 8
+        end
+
+        -- live settings: change any time, e.g. Library.CloseButtonSettings.Delay = 0
+        local Settings = {
+            Animation = WindowInfo.CloseAnimation ~= false,
+            AnimationTime = WindowInfo.CloseAnimationTime,
+            AnimationDegrees = WindowInfo.CloseAnimationDegrees,
+            AnimationDirection = WindowInfo.CloseAnimationDirection,
+            AnimationEasingStyle = WindowInfo.CloseAnimationEasingStyle,
+            AnimationEasingDirection = WindowInfo.CloseAnimationEasingDirection,
+            Delay = WindowInfo.CloseDelay,
+            Icon = WindowInfo.CloseButtonIcon,
+            IconSize = StartIconSize,
+            ButtonSize = StartButtonSize,
+            CustomIconSize = CustomIconSize,
+        }
+        Library.CloseButtonSettings = Settings
+
+        local function GetSpinDelta()
+            local Degrees = math.abs(Settings.AnimationDegrees or 180)
+            local Direction = string.lower(tostring(Settings.AnimationDirection or "CounterClockwise"))
+            if Direction == "clockwise" or Direction == "right" then
+                return Degrees
+            end
+            return -Degrees
+        end
+
+        local Closing = false
+        local CloseButton
+        CloseButton = Library:AddDraggableImageButton({
+            Icon = FallbackCloseIcon,
+            IconSize = Settings.IconSize,
+            Func = function()
+                if Closing or Library.Unloaded then
+                    return
+                end
+                Closing = true
+
+                if Settings.Animation and CloseButton and CloseButton.Button then
+                    local Spin = TweenService:Create(
+                        CloseButton.Button,
+                        TweenInfo.new(
+                            Settings.AnimationTime,
+                            Settings.AnimationEasingStyle,
+                            Settings.AnimationEasingDirection
+                        ),
+                        { Rotation = CloseButton.Button.Rotation + GetSpinDelta() }
+                    )
+                    Spin:Play()
+                    Spin.Completed:Wait()
+                end
+
+                if Settings.Delay and Settings.Delay > 0 then
+                    task.wait(Settings.Delay)
+                end
+
+                if not Library.Unloaded then
+                    Library:Unload()
+                end
+            end,
+            ExcludeScaling = true,
+            ExcludeDragging = WindowInfo.CloseButtonDraggable == false,
+        })
+        Library.CloseButton = CloseButton
+        local Button = CloseButton.Button
+        Button.Size = UDim2.fromOffset(Settings.ButtonSize, Settings.ButtonSize)
+
+        local function ApplyIcon(Icon)
+            Settings.Icon = Icon
+            local Success = pcall(function()
+                CloseButton:SetIcon(Icon)
+            end)
+            if not Success then
+                pcall(function()
+                    CloseButton:SetIcon(FallbackCloseIcon)
+                end)
+            end
+        end
+        ApplyIcon(Settings.Icon)
+
+        -- default spot: right next to Toggle and Lock (or the corner on desktop).
+        -- follows the Lock button when it changes width, until you drag the close button yourself
+        local HasCustomPosition = typeof(WindowInfo.CloseButtonPosition) == "UDim2"
+        local LastAutoPosition
+        local MovedByUser = false
+
+        local function Reposition()
+            if HasCustomPosition or MovedByUser then
+                return
+            end
+
+            local Offset = 6
+            local RowHeight = Button.Size.Y.Offset
+            if ToggleButton and LockButton and WindowInfo.ShowMobileButtons ~= false then
+                Offset = ToggleButton.Button.Size.X.Offset + 12 + LockButton.Button.Size.X.Offset + 6
+                RowHeight = ToggleButton.Button.Size.Y.Offset
+            end
+
+            local Y = 6 + RowHeight / 2
+            if WindowInfo.MobileButtonsSide == "Right" then
+                Button.AnchorPoint = Vector2.new(1, 0.5)
+                LastAutoPosition = UDim2.new(1, -Offset, 0, Y)
+            else
+                Button.AnchorPoint = Vector2.new(0, 0.5)
+                LastAutoPosition = UDim2.fromOffset(Offset, Y)
+            end
+            Button.Position = LastAutoPosition
+        end
+
+        if HasCustomPosition then
+            Button.AnchorPoint = WindowInfo.CloseButtonAnchorPoint or Vector2.zero
+            Button.Position = WindowInfo.CloseButtonPosition
+        else
+            Reposition()
+            Button:GetPropertyChangedSignal("Position"):Connect(function()
+                if LastAutoPosition and Button.Position ~= LastAutoPosition then
+                    MovedByUser = true
+                end
+            end)
+            if LockButton then
+                LockButton.Button:GetPropertyChangedSignal("Size"):Connect(Reposition)
+                ToggleButton.Button:GetPropertyChangedSignal("Size"):Connect(Reposition)
+            end
+        end
+
+        Button.Visible = WindowInfo.ShowCloseButton == true
+
+        function Library:SetCloseButtonVisible(Visible: boolean)
+            Button.Visible = Visible == true
+        end
+
+        function Library:SetCloseButtonIcon(Icon: string)
+            ApplyIcon(Icon)
+        end
+
+        function Library:SetCloseButtonIconSize(Size: number)
+            Settings.IconSize = Size
+            Settings.CustomIconSize = true
+            CloseButton:SetIconSize(Size)
+            Button.Size = UDim2.fromOffset(Settings.ButtonSize, Settings.ButtonSize)
+            Reposition()
+        end
+
+        -- size of the whole button; the icon scales with it unless you set the icon size yourself
+        function Library:SetCloseButtonSize(Size: number)
+            Settings.ButtonSize = Size
+            if not Settings.CustomIconSize then
+                Settings.IconSize = Size - 8
+            end
+            CloseButton:SetIconSize(Settings.IconSize)
+            Button.Size = UDim2.fromOffset(Size, Size)
+            Reposition()
+        end
+
+        -- put the button back in its default spot after dragging it
+        function Library:ResetCloseButtonPosition()
+            MovedByUser = false
+            Reposition()
+        end
+
+        function Window:SetCloseButtonVisible(Visible: boolean)
+            Library:SetCloseButtonVisible(Visible)
+        end
+
+        function Window:SetCloseButtonIcon(Icon: string)
+            Library:SetCloseButtonIcon(Icon)
+        end
+
+        function Window:SetCloseButtonIconSize(Size: number)
+            Library:SetCloseButtonIconSize(Size)
+        end
+
+        function Window:SetCloseButtonSize(Size: number)
+            Library:SetCloseButtonSize(Size)
+        end
+
+        function Window:ResetCloseButtonPosition()
+            Library:ResetCloseButtonPosition()
+        end
+
+        -- Window:SetCloseAnimation({ Animation = false, AnimationTime = 0.2, AnimationDegrees = 360,
+        --     AnimationDirection = "Clockwise", Delay = 0 })
+        function Window:SetCloseAnimation(NewSettings: { [string]: any })
+            for Key, Value in NewSettings do
+                Settings[Key] = Value
+            end
+        end
+    end
+
+    --// Glow \\--
+    do
+        -- soft glow around the window made of thin rings that fade out. follows the accent color.
+        local GlowSettings = {
+            Enabled = WindowInfo.Glow == true,
+            Size = WindowInfo.GlowSize,
+            Intensity = WindowInfo.GlowIntensity,
+            Color = typeof(WindowInfo.GlowColor) == "Color3" and WindowInfo.GlowColor or nil,
+        }
+        Library.GlowSettings = GlowSettings
+
+        local GlowHolder
+
+        local function BuildGlow()
+            if GlowHolder then
+                for _, Descendant in GlowHolder:GetDescendants() do
+                    Library:RemoveFromRegistry(Descendant)
+                end
+                GlowHolder:Destroy()
+                GlowHolder = nil
+            end
+
+            if not GlowSettings.Enabled or not MainFrame then
+                return
+            end
+
+            local Size = math.max(GlowSettings.Size, 2)
+            local Layers = math.clamp(math.ceil(Size / 2), 3, 30)
+            local Step = Size / Layers
+            local Intensity = math.clamp(GlowSettings.Intensity, 0, 1)
+
+            GlowHolder = New("Frame", {
+                BackgroundTransparency = 1,
+                Name = "Glow",
+                Size = UDim2.fromScale(1, 1),
+                Parent = MainFrame,
+            })
+
+            for Layer = 1, Layers do
+                local Offset = (Layer - 1) * Step
+                local Falloff = (1 - (Layer - 0.5) / Layers) ^ 2
+
+                local Ring = New("Frame", {
+                    BackgroundTransparency = 1,
+                    Position = UDim2.fromOffset(-Offset, -Offset),
+                    Size = UDim2.new(1, Offset * 2, 1, Offset * 2),
+                    Parent = GlowHolder,
+                })
+                New("UICorner", {
+                    CornerRadius = UDim.new(0, WindowInfo.CornerRadius + Offset),
+                    Parent = Ring,
+                })
+                New("UIStroke", {
+                    ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+                    BorderStrokePosition = Enum.BorderStrokePosition.Outer,
+                    Color = GlowSettings.Color or "AccentColor",
+                    Thickness = Step + 0.5,
+                    Transparency = 1 - Intensity * Falloff,
+                    Parent = Ring,
+                })
+            end
+        end
+
+        function Library:SetGlow(Enabled: boolean)
+            GlowSettings.Enabled = Enabled == true
+            BuildGlow()
+        end
+
+        function Library:SetGlowSize(Size: number)
+            GlowSettings.Size = Size
+            BuildGlow()
+        end
+
+        function Library:SetGlowIntensity(Intensity: number)
+            GlowSettings.Intensity = Intensity
+            BuildGlow()
+        end
+
+        -- pass a Color3 for a fixed color, or nil to follow the accent color again
+        function Library:SetGlowColor(Color: Color3?)
+            GlowSettings.Color = typeof(Color) == "Color3" and Color or nil
+            BuildGlow()
+        end
+
+        function Window:SetGlow(Enabled: boolean)
+            Library:SetGlow(Enabled)
+        end
+
+        function Window:SetGlowSize(Size: number)
+            Library:SetGlowSize(Size)
+        end
+
+        function Window:SetGlowIntensity(Intensity: number)
+            Library:SetGlowIntensity(Intensity)
+        end
+
+        function Window:SetGlowColor(Color: Color3?)
+            Library:SetGlowColor(Color)
+        end
+
+        BuildGlow()
     end
 
     --// Execution \\--
